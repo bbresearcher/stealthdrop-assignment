@@ -3,6 +3,25 @@ global CANDIDATES: Field = 2;
 use dep::std;
 use dep::ecrecover;
 
+// Reused code from ZKCamp
+// https://github.com/ZKCamp/noir-basics/blob/main/crypto_primitives/src/verify_signature.nr
+// --------------------------- LIBRARY FUNCTIONS START --------------------------- //
+fn split_u8_64(
+    arr: [u8; 64]
+) -> ([u8; 32], [u8; 32]) {
+    let mut arr_a: [u8; 32] = [0; 32];
+    let mut arr_b: [u8; 32] = [0; 32];
+
+    for i in 0..32 {
+        arr_a[i] = arr[i];
+        arr_b[i] = arr[i + 32];
+    };
+
+    (arr_a, arr_b)
+}
+
+// --------------------------- LIBRARY FUNCTIONS END --------------------------- //
+
 fn main(
   pub_key: [u8; 64],
   signature: [u8; 64],
@@ -11,11 +30,43 @@ fn main(
   polynomial_commitment: Field,
   nullifier: pub [u8; 32],
 ) {
-  // Write your main logic here
+  
+  // First validate the ECDSA signature
+  let (pub_key_x, pub_key_y) = split_u8_64(pub_key);
+  let key = ecrecover::secp256k1::PubKey::from_xy(pub_key_x, pub_key_y);
+  let valid_signature = key.verify_sig(signature, hashed_message);
+  assert(valid_signature);
+
+  // recover address
+  let sender_addres = key.ecrecover(signature, hashed_message);
+  // check inclusion of address in polynomial
+  let checked_polynomial = evaluate_polynomial(polynomial,sender_addres);
+  assert(checked_polynomial == 0);
+
+  // now check that the hash of the polynimial is the same as the polynomial_commitment
+  let poly_hash = std::hash::pedersen(polynomial);
+  assert(polynomial_commitment == poly_hash[0]);
+
+
+  // Check nullifier is a hash of the address
+  let nullfier_hash = std::hash::blake2s(signature);
+  assert(nullfier_hash==nullifier);
+
 }
 
 fn evaluate_polynomial(polynomial: [Field; CANDIDATES + 1], x: Field) -> Field {
-  // Write logic to evaluate polynomial here
+  // Formula is (x - a) * (x - b)
+  // recovered address is 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266
+  let mut multiplied = 1;
+  let mut poly_field = 0;
+  for i in 0..CANDIDATES+1{
+      poly_field = polynomial[i] * multiplied + poly_field;
+      multiplied = multiplied * x;
+  }
+  std::println(poly_field);
+  //assert(poly_field == 0);
+  
+  poly_field
 }
 
 #[test]
